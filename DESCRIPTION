@@ -1,0 +1,18 @@
+Package: cosinet
+Title: differential CO-expression-based SIngle-sample NETwork rewiring degree quantification tool
+Version: 0.99.1
+Authors@R: 
+    person("Lanying", "Wei", email="lanying.v@gmail.com",
+    role = c("aut", "cre"), comment = c(ORCID = "0000-0002-4281-8017"))
+Description: Cosinet is designed to conduct patient-specific analysis of differential co-expression networks. It assesses the extent of network rewiring in an individual sample relative to reference conditions, in terms of differential co-expression networks. Cosinet can identify important differences in gene co-expression patterns between individual patients, and it generates scores that can be linked to clinical features or outcomes for each individual. Its primary objective is to provide a better understanding of disease mechanisms and valuable insights for personalized treatment decisions.
+License: LGPL-3
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+Depends: 
+    R (>= 4.2.0)
+Imports: foreach, parallel, doParallel, ggplot2, ggrepel, qgraph, graphics, stats, utils
+VignetteBuilder: knitr
+Suggests: BiocStyle, knitr, rmarkdown, kableExtra, BiocManager, clusterProfiler, msigdbr, survival, survminer
+biocViews: NetworkInference, GraphAndNetwork, Network, GeneExpression, DifferentialExpression, MultipleComparison, GeneSetEnrichment, NetworkEnrichment, Pathways, Software 
+LazyData: false

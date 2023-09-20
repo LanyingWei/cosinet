@@ -1,0 +1,115 @@
+#' Differential Co-expression
+#'
+#' Calculate differential co-expression using z-score method.
+#'
+#' Calculate differential co-expression between two conditions using
+#' z-score method.
+#' Spearman's or Pearson’s correlations and Fisher’s z-transform were used to
+#' test for a correlation difference base on gene expression matrix.
+#'
+#' @param exprMat an expression matrix. The rows represent genes and
+#' the columns represent samples.
+#' @param condition a vector of test conditions for each samples.
+#' There should be two conditions within this vector. The order of the vector
+#' should match the column order of the expression matrix.
+#' @param corMethod a character string indicating which correlation coefficient
+#' to use. One of "spearman" (default) or "pearson".
+#'
+#' @return a matrix of z-scores representing differential associations
+#' of gene expression between two conditions.
+#'
+#' @examples
+#' # get expression data
+#' data(exprBC)
+#' # get sample information
+#' data(samplesBC)
+#'
+#' # calculate differential correlation matrix
+#' dcMat <- DCMat(exprMat = exprBC,
+#'                condition = samplesBC$er_status,
+#'                corMethod = "spearman")
+#'
+#' @author Lanying Wei
+#'
+#' @seealso \code{\link{DCPlot}}
+#' @seealso \code{\link{eigenCentrality}}
+#'
+#' @export
+
+DCMat <- function(exprMat,
+                  condition,
+                  corMethod=c("spearman", "pearson")) {
+
+    stopifnot(!missing(exprMat),
+              !missing(condition),
+              length(condition) == ncol(exprMat))
+
+    corMethod <- match.arg(corMethod)
+    condition <- factor(condition)
+
+    if (length(levels(condition)) != 2) {
+        stop("There should be 2 levels of condition.")
+    }
+
+    message("Calculating differential coexpression matrix for ",
+            levels(condition)[2],
+            " (n=",
+            sum(condition %in% levels(condition)[2]),
+            ") ",
+            "versus ", levels(condition)[1],
+            " (n=",
+            sum(condition %in% levels(condition)[1]),
+            ") ...")
+
+    exprMat1 <- exprMat[, condition %in% levels(condition)[1], drop = FALSE]
+    exprMat2 <- exprMat[, condition %in% levels(condition)[2], drop = FALSE]
+
+    const <- 1
+    if (corMethod %in% 'spearman') {
+        const <- 1.06
+        message("Use Spearman correlation.")
+    } else {
+        message("Use Pearson correlation.")
+    }
+
+    message("Calculating correlation matrix for the first condition...")
+    r1 <- getCor(t(exprMat1), corMethod)
+    message("Calculating correlation matrix for the second condition...")
+    r2 <- getCor(t(exprMat2), corMethod)
+    message("Fisher transformation...")
+    z1 <- atanh(r1)
+    z2 <- atanh(r2)
+    z <- (z2-z1)/sqrt(const/(sum(condition %in% levels(condition)[2])-3)+
+                          const/(sum(condition %in% levels(condition)[1])-3))
+    z[is.nan(z)] <- 0
+    z[is.infinite(z)] <- 0
+    diag(z) <- 0
+
+    message("Done.")
+
+    return(z)
+}
+
+getCor <- function(exprMat,
+                   corMethod=c("spearman", "pearson")) {
+
+    corMethod <- match.arg(corMethod)
+
+    if (corMethod %in% "spearman") {
+        exprMat <- apply(exprMat, 2, rank)
+    }
+
+    design <- matrix(data = 1,
+                     nrow = nrow(exprMat),
+                     ncol = 1)
+    QR <- qr(design)
+    E <- qr.qty(QR, exprMat)
+    s2 <- colMeans(E[-1, ]^2)
+    U <- t(t(E[-1, ])/sqrt(s2))
+    c <- crossprod(U)/nrow(U)
+    diag(c) <- 1
+
+    return(c)
+}
+
+

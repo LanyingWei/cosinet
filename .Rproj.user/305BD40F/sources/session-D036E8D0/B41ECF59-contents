@@ -1,0 +1,166 @@
+#' Scatter Plot of Gene Expression
+#'
+#' Plot gene pair expression scatter plot.
+#'
+#' Plot gene pair expression scatter plot to show gene co-expression patterns
+#' of different conditions. Point colors represent different conditions. An
+#' input score can be given to distinguish samples using different point shapes.
+#'
+#' @param exprMat an expression matrix. The rows represent genes and
+#' the columns represent samples.
+#' @param geneX gene on the X axis to plot.
+#' @param geneY gene(s) on the Y axis to plot. Can be a single gene or a gene
+#' vector.
+#' @param condition a vector of test conditions for each samples.
+#' There should be two conditions within this vector. The order of the vector
+#' should match the column order of the expression matrix.
+#' @param scores a numeric vector of scores used to distinguish samples. The
+#' order of the vector should match the column order of the expression matrix.
+#' @param highCut a numeric value that serves as the upper cutoff of
+#' "scores".
+#' @param lowCut a numeric value that serves as the lower cutoff of
+#' "scores".
+#' @param legends a character vector of three legends used to distinguish
+#' samples based on the input scores. The first represents the group having a
+#' score lower than the "lowCut", the third the group higher than the "highCut"
+#' and the second the rest samples.
+#' @param shapes a integer vector indicating the three shapes used to distinguish
+#' samples based on the input scores. The first for the group having a
+#' score lower than the "lowCut", the third the group higher than the "highCut"
+#' and the second the rest samples.
+#' @param alpha a numeric value between 0 and 1 for point transparancy.
+#' @param size a numeric value that represents the size of points and outlines.
+#' @param palette the color palette to be used for coloring or filling by
+#' conditions. See \code{ggpubr::ggscatter} for more details.
+#' @param add allowed values are one of "none", "reg.line" (for adding linear
+#' regression line) or "loess" (for adding local regression fitting).
+#' @param addCorStat logical indicator of adding correlation coefficients with
+#' p-values to the scatter plot or not.
+#' @param method a character string indicating which correlation coefficient
+#' is to be computed. One of "spearman" (default) or "pearson".
+#' @param seperate logical indicator for separating the plot by condition.
+#' @param ... other parameters passed to \code{ggpubr::ggscatter}.
+#'
+#' @return scatter plot object.
+#'
+#' @author Lanying Wei
+#'
+#' @seealso \code{\link{DCMat}}
+#' @seealso \code{\link{DCPlot}}
+#'
+#'
+#' @importFrom ggpubr ggscatter stat_cor
+#'
+#' @examples
+#'
+#' # get expression data
+#' data(exprBC)
+#' # get sample information
+#' data(samplesBC)
+#' # get ER status
+#' condition <- rep(NA, nrow(samplesBC))
+#' condition[samplesBC$er_status %in% 0] <- "ER-Negative"
+#' condition[samplesBC$er_status %in% 1] <- "ER-Positive"
+#'
+#' # expression scatter plot
+#' scatterCorPlot(exprMat = exprBC,
+#'                geneX = "ZNF521",
+#'                geneY = "BICC1",
+#'                condition = condition,
+#'                seperate = TRUE,
+#'                label.y = 4)
+#'
+#'
+#' @importFrom graphics par
+#'
+#' @export
+
+scatterCorPlot <- function(exprMat,
+                           geneX,
+                           geneY,
+                           condition,
+                           scores=NULL,
+                           highCut=0,
+                           lowCut=highCut,
+                           legends=c("Low", "Medium", "High"),
+                           shapes=c(19, 4, 0),
+                           alpha=1,
+                           size=1,
+                           palette="simpsons",
+                           add="reg.line",
+                           addCorStat=TRUE,
+                           method=c("spearman", "pearson"),
+                           seperate=FALSE,
+                           ...) {
+
+
+    stopifnot(!missing(exprMat),
+              !missing(geneX),
+              !missing(geneY),
+              !missing(condition),
+              geneX %in% rownames(exprMat),
+              geneY %in% rownames(exprMat),
+              length(condition) == ncol(exprMat))
+
+    method <- match.arg(method)
+
+    data <- as.data.frame(t(exprMat[c(geneX, geneY), ]))
+    data$Condition <- as.character(condition)
+    data$Condition[is.na(condition)] <- "NA"
+
+    Condition <- data$Condition
+
+    if (length(geneY) == 1) {
+        if (is.null(scores)) {
+            p <- ggscatter(data, x = geneX, y = geneY,
+                           size = size, combine = TRUE,
+                           color = "Condition", palette = palette,
+                           add = add, conf.int = TRUE,
+                           alpha = alpha,
+                           ...)
+        } else {
+            data$Score <- legends[2]
+            data$Score[scores > highCut] <- legends[3]
+            data$Score[scores < lowCut] <- legends[1]
+            p <- ggscatter(data, x = geneX, y = geneY, size = size,
+                           combine = TRUE,
+                           color = "Condition", palette = palette,
+                           shape = "Score",
+                           add = add, conf.int = TRUE,
+                           alpha = alpha,
+                           ...) +
+                scale_shape_manual(values = shapes)
+        }
+    } else if (length(geneY) > 1) {
+        if (is.null(scores)) {
+            p <- ggscatter(data, x = geneX, y = geneY, size = size,
+                           combine = TRUE, ylab = "Expression",
+                           color = "Condition", palette = palette,
+                           add = add, conf.int = TRUE,
+                           alpha = alpha,
+                           ...)
+        } else {
+            data$Score <- legends[2]
+            data$Score[scores > highCut] <- legends[3]
+            data$Score[scores < lowCut] <- legends[1]
+            p <- ggscatter(data, x = geneX, y = geneY, size = size,
+                           combine = TRUE, ylab = "Expression",
+                           color = "Condition", palette = palette,
+                           shape = "Score",
+                           add = add, conf.int = TRUE,
+                           alpha = alpha,
+                           ...) +
+                scale_shape_manual(values = shapes)
+        }
+    }
+
+    if (seperate == TRUE) {
+        p <- p + facet_wrap(~Condition)
+    }
+
+    if (addCorStat == TRUE) {
+        p <- p + stat_cor(aes(color = Condition), method = method, ...)
+    }
+
+    return(p)
+}

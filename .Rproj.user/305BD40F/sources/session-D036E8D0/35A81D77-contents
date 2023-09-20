@@ -1,0 +1,48 @@
+#' @details
+#' This package calculates cosinet score for a given set of genes. Based on gene
+#' co-expression pattern of a given gene set, cosinet scores measure the
+#' likelihood that a sample belongs to one condition other than the other. To
+#' get a set of genes that show interesting differential co-expression between
+#' two conditions, we provide functions for z-scored based differential
+#' correaltion analysis, followed by eigenvector centrality calculation to get a
+#' ranked gene list for network-level differential expression. Based on this
+#' ranking, one can further perform gene set enrichment analysis (GSEA) to get
+#' enriched pathways, and use its core enrichment genes to run cosinet
+#' calculation. These functions are available:
+#'
+#' @section Before GSEA:
+#' \itemize{
+#'    \item{\code{\link{matPreprocess}}}: Preprocess expression matrix for
+#'    co-expression analysis.
+#'    \item{\code{\link{DCMat}}}: Calculate differential co-expression using
+#'    z-score method.
+#'    \item{\code{\link{eigenCentrality}}}: Calculate eigenvector centrality
+#'    with differential co-expression matrix.
+#'    \item{\code{\link{rankPlot}}}: Draw the score and rank of gene centrality
+#'    for checking.
+#' }
+#'
+#' Then the resulting gene centrality scores can be used as input for GSEA using
+#' for example \code{GSEA} function from \code{clusterProfiler}
+#' package. And the core-enchment genes for the
+#' interesting enriched pathways can be used to perform following analysis:
+#'
+#' @section After GSEA:
+#' \itemize{
+#'    \item{\code{\link{DCPlot}}}: Plot differential co-expression network for
+#'    a given set of genes.
+#'    \item{\code{\link{getCosi}}}: Calculate cosinet score for a given set of
+#'    genes.
+#' }
+#'
+#'
+#' @author Lanying Wei
+#'
+#' @seealso \code{\link{matPreprocess}}
+#' @seealso \code{\link{DCMat}}
+#' @seealso \code{\link{eigenCentrality}}
+#' @seealso \code{\link{rankPlot}}
+#' @seealso \code{\link{DCPlot}}
+#' @seealso \code{\link{getCosi}}
+#'
+"_PACKAGE"

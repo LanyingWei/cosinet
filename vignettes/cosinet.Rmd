@@ -1,0 +1,291 @@
+---
+title: "An Introduction to cosinet"
+author: "Lanying Wei"
+package: "cosinet"
+date: "`r Sys.Date()`"
+output:
+  BiocStyle::html_document:
+    toc_float: true
+vignette: >
+  %\VignetteIndexEntry{An introduction to cosinet}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+    collapse = TRUE,
+    error = TRUE,
+    warning = TRUE,
+    message = TRUE,
+    comment = "#>",
+    crop = NULL,
+    out.width = "100%"
+)
+```
+
+# Introduction
+
+`Cosinet` is an R package that aims to bridge the gap between differential
+co-expression network analysis and precision medicine by accurately
+quantifying the degree of rewiring of co-expression networks at
+the level of individual samples. Differential co-expression network analysis
+is a valuable approach for understanding the underlying mechanisms of disease
+and informing the development of personalized therapies, but current
+approaches typically measure an average differential network across multiple
+samples, making it difficult to apply in the field of precision medicine.
+Cosinet utilizes gene expression data to determine the degree of similarity
+between the gene co-expression patterns of a given sample and reference
+conditions within the context of a function-specific differential
+co-expression network. To obtain differential co-expression network, 
+we provide R function for z-score-based differential co-expression analysis. 
+Next, we calculate eigenvector centrality to get a ranked gene list, 
+which represents the degree of hubness of each gene in the network.
+Based on the ranking, one can further perform gene set enrichment analysis
+(GSEA) to get enriched pathways, and use the core enrichment genes of a relevant 
+pathway to form a function-specific differential co-expression sub-network. 
+Finally, Cosinet scores can be calculated based on the specific 
+sub-network. Here we show an example of using Cosinet to quantify the degree of 
+rewiring with respect to the estrogen receptor (ER) response network for each 
+estrogen receptor-positive (ER+) sample relative to the whole ER+ and estrogen 
+receptor-negative (ER–) groups. ER+ breast cancer patients are typically treated 
+with endocrine therapy. We demonstrate the quantified Cosinet scores 
+significantly associate with survival outcomes in ER+ samples treated with 
+endocrine therapy. The results highlight the potential of Cosinet to identify 
+important differences in gene co-expression patterns between individual patients 
+and to provide valuable insights for personalized treatment decisions.
+
+# Installation
+To install the cosinet package, you can use the remotes package:
+```{r setup, eval=FALSE}
+# install Cosinet
+if (!requireNamespace("remotes", quietly=TRUE))
+    install.packages("remotes")
+remotes::install_github("LanyingWei/cosinet")
+
+```
+
+# Data analysis example
+
+## Prepare data
+First we load the library and an exemplar dataset, and preprocess the expression 
+data. The exemplar data is a subset of RNA-seq gene expression data from breast 
+cancer patients. The full data is available in the Gene Expression Omnibus (GEO) repository under accession number GSE96058. The format of the expression value 
+is log2(FPKM + 0.1) and was rounded to one digit to reduce data size. 
+
+```{r prepare data}
+library(cosinet)
+# get expression data
+data(exprBC)
+# get sample information
+data(samplesBC)
+
+# Check the order of the samples
+all(colnames(exprBC) == samplesBC$title)
+
+# get ER status as condition
+condition <- rep(NA, nrow(samplesBC))
+condition[samplesBC$er_status %in% 0] <- "ER-Negative"
+condition[samplesBC$er_status %in% 1] <- "ER-Positive"
+condition <- factor(condition, levels = c("ER-Negative", "ER-Positive"))
+# check the number of samples for each condition
+table(condition)
+
+# genes that are expressed in less than 20 samples for any condition are removed
+# the data has already been transformed to log2(FPKM+0.01), so logTrans is set 
+# to FALSE
+exprBC <- matPreprocess(exprMat = exprBC,
+                        condition = condition,
+                        minSample = 20,
+                        minExp = log(0 + 0.01),
+                        logTrans = FALSE)
+```
+
+## Differential co-expression network
+
+We then perform differential co-expression (DC) analysis to obtain a DC matrix. 
+`Cosinet` provides a function for z-score-based DC analysis. A matrix derived 
+with other methods, as long as it represents the level of differential 
+co-expression of gene pairs between two conditions, can also be used for the 
+downstream analysis.
+
+```{r DC matrix}
+# calculate differential co-expression matrix
+dcMat <- DCMat(exprMat = exprBC,
+               condition = condition,
+               corMethod = "spearman")
+```
+
+## Gene centrality
+
+Next, we rank genes based on the eigenvector centrality of the full DC network.
+Eigenvector centrality measures node importance by summing its neighbors' 
+centralities. A node with many connections to other high-centrality nodes has 
+high eigenvector centrality, while a node with few connections has a low 
+centrality value. This allows identifying highly central genes that 
+participate in a larger regulatory networks of certain in biological processes 
+or pathways.
+
+```{r gene centrality, fig.width=5, fig.height=5}
+# calculate gene centrality based on differential correlation matrix
+geneCentrality <- eigenCentrality(mat = dcMat)
+# plot gene centrality rank plot
+rankPlot(geneCentrality, nLabel = 10, nIQR = 2, 
+         main = "Gene Centrality")
+```
+
+## Gene set enrichment analysis
+
+Now that we have the gene centrality scores, we can use them as input to perform 
+gene set enrichment analysis (GSEA) to obtain function-specific gene sets that 
+are enriched for differentially co-expressed genes. Here we use
+`r Biocpkg("clusterProfiler")` and MsigDB hallmark gene sets to perform GSEA as 
+an example.
+
+```{r GSEA install, eval=FALSE}
+# install packages
+if (!require("clusterProfiler", quietly = TRUE)) {
+    install.packages("clusterProfiler")
+}
+if (!require("msigdbr", quietly = TRUE)) BiocManager::install("msigdbr")
+```
+
+```{r GSEA }
+# get hallmark gene sets
+geneSets <- msigdbr::msigdbr(species = "Homo sapiens", category = "H")
+geneSets <- geneSets[, c("gs_name", "gene_symbol")]
+
+# run GSEA
+# remember to set scoreType to "pos" since we only care about gene
+# sets that are enriched at the top of the ranked list
+library(clusterProfiler)
+resGSEA <- GSEA(geneCentrality,
+                TERM2GENE = geneSets,
+                pvalueCutoff = 0.01,
+                pAdjustMethod = "hochberg",
+                seed = TRUE,
+                scoreType = "pos",
+                eps = 0)
+slot(resGSEA, "result")[, c(5, 7)]
+```
+
+
+The third enriched gene set is "HALLMARK_ESTROGEN_RESPONSE_EARLY", we use
+the core enrichment genes in this gene set to calculate the Cosinet score.
+
+```{r GSEA get genes, fig.width=9, fig.height=4.5, fig.wide=TRUE}
+# check GSEA plot for the "HALLMARK_ESTROGEN_RESPONSE_EARLY" gene set
+# gseaplot(resGSEA,
+#          geneSetID = slot(resGSEA, "result")$ID[3],
+#          title = slot(resGSEA, "result")$Description[3])
+
+# get core enrichment genes
+genes <- slot(resGSEA, "result")$core_enrichment[3]
+genes <- strsplit(genes, "\\/")[[1]]
+
+# check DC plot for selected genes
+# blue edges indicate positive correlation, red for negative correlation
+# for more details, please see the manual page of the "DCPlot" function
+p <- DCPlot(exprMat = exprBC,
+            condition = condition,
+            genes = genes,
+            dcMat = dcMat,
+            posDCCut = 3,
+            negDCCut = -3,
+            corMethod = "spearman",
+            minimum = 0.3,
+            labelCex = 0.6)
+
+```
+
+## Get Cosinet score
+
+With a set of interesting DC genes we can calculate the corresponding Cosinet
+scores based on the sub-network of these genes.
+
+```{r getCosi, fig.width=6, fig.height=3}
+# calculate Cosinet scores with given genes
+# only gene pairs with a DC matrix value greater than 3 or less than -3 are 
+# included in the calculation
+scoreMat <- getCosi(exprMat = exprBC,
+                    bin = 0.1,
+                    condition = condition,
+                    genes = genes,
+                    dcMat = dcMat,
+                    weighted = TRUE,
+                    posDCCut = 3,
+                    negDCCut = -3,
+                    threads = 2)
+scoreMat[1:5, 1:5]
+
+# plot histogram for Cosinet scores
+library(ggplot2)
+data <- data.frame(Cosinet = scoreMat$Cosinet)
+data <- cbind.data.frame(data, samplesBC)
+ggplot(data, aes(x = Cosinet, fill = condition)) +
+    geom_histogram(color="#e9ecef", alpha = 0.6,
+                   position = 'identity', bins = 30) +
+    guides(fill = guide_legend("ER status")) +
+    geom_vline(xintercept = 0, linetype="dashed",
+               color = "grey") +
+    labs(x = "Cosinet score (early ER response)") +
+    theme_bw()
+```
+
+
+## Survival analysis
+Finally, we perform survival analysis using Cosinet score and age as 
+covariates.
+
+```{r survival install, eval=FALSE}
+# install packages
+if (!require("survival", quietly = TRUE)) install.packages("survival")
+if (!require("survminer", quietly = TRUE)) install.packages("survminer")
+```
+
+```{r survival, fig.width=6, fig.height=4, fig.wide=TRUE}
+
+library(survival)
+library(survminer)
+
+# extract ER-positive samples
+dataERPos <- data[data$er_status %in% 1, ]
+
+# fit a Cox proportional hazards regression model with Cosinet score and age
+survModel <- coxph(Surv(overall_survival_days,
+                        overall_survival_event) ~ Cosinet + 
+                       age_at_diagnosis,
+                   data = dataERPos)
+summary(survModel)
+
+# fit a survival curve for patients with different levels of Cosinet scores 
+# using the Kaplan-Meier method
+
+dataERPos$CosinetScore <- NA
+dataERPos$CosinetScore[dataERPos$Cosinet <= 0] <- "Low"
+dataERPos$CosinetScore[dataERPos$Cosinet > 0 & 
+                           dataERPos$Cosinet <= 0.5] <- "Medium"
+dataERPos$CosinetScore[dataERPos$Cosinet > 0.5] <- "High"
+
+dataERPos$CosinetScore <- factor(dataERPos$CosinetScore, 
+                                 levels = c("Low", "Medium", "High"))
+
+fit <- survfit(Surv(overall_survival_days, 
+                    overall_survival_event) ~ CosinetScore, data = dataERPos)
+
+ggsurvplot(fit,
+           data = dataERPos,
+           conf.int = TRUE,         
+           pval = TRUE,
+           legend.labs = c("Low", "Medium", "High"),
+           legend.title = "Cosinet Score",
+           ggtheme = theme_bw())
+
+```
+
+# Session info {.unnumbered}
+
+```{r sessionInfo, echo=FALSE}
+sessionInfo()
+```

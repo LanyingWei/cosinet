@@ -1,0 +1,18 @@
+Package: cosinet
+Title: Co-expression based single sample perturbation level quantification for differential co-expression networks
+Version: 0.99.0
+Authors@R: 
+    person("Lanying", "Wei", email="weilanying@stonewise.cn",
+    role = c("aut", "cre"), comment = c(ORCID = "0000-0002-4281-8017"))
+Description: Calculate cosinet score for a given set of genes. Based on gene co-expression pattern of a given gene set, cosinet scores measure the likelihood that a sample belongs to one condition other than the other.
+License: LGPL-3
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.2
+Depends: 
+    R (>= 4.3.0)
+Imports: foreach, parallel, doParallel, ggplot2, ggrepel, qgraph, graphics, stats, utils
+VignetteBuilder: knitr
+Suggests: BiocStyle, knitr, rmarkdown, kableExtra, BiocManager, clusterProfiler, msigdbr, survival, survminer
+biocViews: NetworkInference, GraphAndNetwork, Network, GeneExpression, DifferentialExpression, GeneSetEnrichment, NetworkEnrichment, Pathways, Software 
+LazyData: false

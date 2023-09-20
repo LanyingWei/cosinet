@@ -1,0 +1,26 @@
+{
+    "id": "BB2DAAF2",
+    "path": "~/cosinet/R/getCosi.R",
+    "project_path": "R/getCosi.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1673426504422.0,
+    "source_on_save": false,
+    "relative_order": 5,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "96,32",
+        "scrollLine": "72"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1672390786,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1672390786,
+    "read_only": false,
+    "read_only_alternatives": []
+}

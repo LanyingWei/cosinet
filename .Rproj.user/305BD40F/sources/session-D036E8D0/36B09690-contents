@@ -1,0 +1,340 @@
+source("/da1/home/weilanying/project/diseaseGRN/script/CosinetScript/cosinetPackage/DCMat.R")
+source("/da1/home/weilanying/project/diseaseGRN/script/CosinetScript/cosinetPackage/DCPlot.R")
+source("/da1/home/weilanying/project/diseaseGRN/script/CosinetScript/cosinetPackage/eigenCentrality.R")
+source("/da1/home/weilanying/project/diseaseGRN/script/CosinetScript/cosinetPackage/getCosi_4.R")
+source("/da1/home/weilanying/project/diseaseGRN/script/CosinetScript/cosinetPackage/matPreprocess_2.R")
+source("/da1/home/weilanying/project/diseaseGRN/script/CosinetScript/cosinetPackage/scatterCorPlot_2.R")
+source("/da1/home/weilanying/project/diseaseGRN/script/CosinetScript/cosinetPackage/rankPlot.R")
+source("/da1/home/weilanying/project/diseaseGRN/script/CosinetScript/runGSEA.R")
+
+
+library(data.table)
+library(ggplot2)
+library(ggpubr)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(survival)
+library(survminer)
+
+
+exprs <- readRDS("/da1/home/weilanying/project/diseaseGRN/script/GSE96058/exprs.rds")
+sampleInfo <- readRDS("/da1/home/weilanying/project/diseaseGRN/script/GSE96058/sampleInfo.rds")
+
+
+condition <- sampleInfo$`er status:ch1`
+condition <- factor(condition)
+table(condition)
+
+exprs <- matPreprocess(exprMat = exprs, 
+                       condition = condition, 
+                       logTrans = FALSE,
+                       zeroToNA = FALSE,
+                       scaleByCondition = FALSE,
+                       minSample = 20)
+dim(exprs)
+dcMat <- DCMat(exprMat = exprs, 
+               condition = condition,
+               corMethod = "spearman")
+
+geneCentrality <- eigenCentrality(mat = dcMat)
+rankPlot(geneCentrality)
+
+gseaRes <- runGSEAmultiple(geneScore = geneCentrality,
+                           pAdjustMethod = "hochberg",
+                           pvalueCutoff = 0.01,
+                           databases = c("MSigDBH"))
+
+lapply(gseaRes, function(x) x@result[, c(2, 5, 7)])
+
+gseaAll <- gseaRes$MSigDBH@result
+scoreMatAll <- list()
+coxphAll <- list()
+coxphAgeAll <- list()
+
+for (i in seq_along(gseaAll$ID)) {
+    gsTitle <- gseaAll$Description[i]
+    print(gsTitle)
+    resDir <- paste0("~/project/diseaseGRN/result/GSE96058/", gsTitle)
+    # dir.create(resDir)
+    genes <- gseaRes$MSigDBH@result$core_enrichment[i]
+    genes <- strsplit(genes, "\\/")[[1]]
+    
+    scoreMat <- getCosi(exp = exprs,
+                        bin = 0.1,
+                        condition = condition,
+                        genes = genes, 
+                        dcMat = dcMat, 
+                        posDCCut = 3,
+                        negDCCut = -3,
+                        threads = 20,
+                        pAdjCut = 0.05)
+    
+    scoreMat <- scoreMatAll[[i]]
+    scoreMatAll[[i]] <- scoreMat
+    names(scoreMatAll)[i] <- gsTitle
+    
+    data <- data.frame(cosinet = scoreMat$CosiNet, 
+                       ESR1 = exprs["ESR1", ],
+                       MKI67 = exprs["MKI67", ])
+    
+    data <- cbind(data, sampleInfo)
+    data <- data[data$`chemo treated:ch1` %in% 0 &
+                     data$`endocrine treated:ch1` %in% 1, ]
+    
+    mod <- coxph(Surv(data$`overall survival days:ch1`, 
+                      data$`overall survival event:ch1`) ~ data$cosinet)
+    
+    coxphAll[[i]] <- mod
+    names(coxphAll)[i] <- gsTitle
+    
+    mod2 <- coxph(Surv(data$`overall survival days:ch1`, 
+                       data$`overall survival event:ch1`) ~ data$cosinet + 
+                      data$`age at diagnosis:ch1`)
+    
+    coxphAgeAll[[i]] <- mod2
+    names(coxphAgeAll)[i] <- gsTitle
+    
+}
+
+
+exprs <- readRDS("/da1/home/weilanying/project/diseaseGRN/script/GSE96058/exprs.rds")
+exprs <- matPreprocess(exprMat = exprs, 
+                       condition = condition, 
+                       logTrans = FALSE,
+                       zeroToNA = TRUE,
+                       scaleByCondition = TRUE,
+                       minSample = 20)
+
+
+scoreMatScaledAll <- list()
+coxphScaledAll <- list()
+coxphAgeScaledAll <- list()
+
+for (i in seq_along(gseaAll$ID)) {
+    gsTitle <- gseaAll$Description[i]
+    print(gsTitle)
+    resDir <- paste0("~/project/diseaseGRN/result/GSE96058/", gsTitle)
+    # dir.create(resDir)
+    genes <- gseaRes$MSigDBH@result$core_enrichment[i]
+    genes <- strsplit(genes, "\\/")[[1]]
+    
+    scoreMat <- getCosi(exp = exprs,
+                        bin = 0.1,
+                        condition = condition,
+                        genes = genes,
+                        dcMat = dcMat,
+                        posDCCut = 3,
+                        negDCCut = -3,
+                        threads = 20,
+                        pAdjCut = 0.05)
+    
+    
+    scoreMatScaledAll[[i]] <- scoreMat
+    names(scoreMatScaledAll)[i] <- gsTitle
+    
+    data <- data.frame(cosinet = scoreMat$CosiNet, 
+                       ESR1 = exprs["ESR1", ],
+                       MKI67 = exprs["MKI67", ])
+    
+    data <- cbind(data, sampleInfo)
+    data <- data[data$`chemo treated:ch1` %in% 0 &
+                     data$`endocrine treated:ch1` %in% 1, ]
+    
+    mod <- coxph(Surv(data$`overall survival days:ch1`, 
+                      data$`overall survival event:ch1`) ~ data$cosinet)
+    
+    coxphScaledAll[[i]] <- mod
+    names(coxphScaledAll)[i] <- gsTitle
+    
+    mod2 <- coxph(Surv(data$`overall survival days:ch1`, 
+                       data$`overall survival event:ch1`) ~ data$cosinet + 
+                      data$`age at diagnosis:ch1`)
+    
+    coxphAgeScaledAll[[i]] <- mod2
+    names(coxphAgeScaledAll)[i] <- gsTitle
+    
+}
+
+scoreMat <- scoreMatAll$HALLMARK_ESTROGEN_RESPONSE_EARLY
+
+
+exprs <- readRDS("/da1/home/weilanying/project/diseaseGRN/script/GSE96058/exprs.rds")
+
+exprs <- matPreprocess(exprMat = exprs, 
+                       condition = condition, 
+                       logTrans = FALSE,
+                       zeroToNA = FALSE,
+                       scaleByCondition = FALSE,
+                       minSample = 20)
+
+data <- data.frame(cosinet = scoreMat3$CosiNet, 
+                   ESR1 = exprs["ESR1", ],
+                   MKI67 = exprs["MKI67", ])
+
+data <- cbind(data, sampleInfo)
+data <- data[data$`chemo treated:ch1` %in% 0 &
+                 data$`endocrine treated:ch1` %in% 1, ]
+
+plot(data$cosinet, data$`overall survival days:ch1`)
+
+data$CosinetScore <- NA
+data$CosinetScore[data$cosinet < 0] <- "Low"
+data$CosinetScore[data$cosinet >= 2] <- "Very High"
+data$CosinetScore[data$cosinet >= 1 & data$cosinet < 2] <- "High"
+data$CosinetScore[data$cosinet < 1 & data$cosinet >= 0] <- "Medium"
+
+data$CosinetScore <- factor(data$CosinetScore, 
+                            levels = c("Low", "Medium", "High", "Very High"))
+
+
+data$nhg <- NA
+data$nhg[data$`nhg:ch1` %in% "G1"] <- 1
+data$nhg[data$`nhg:ch1` %in% "G2"] <- 2
+data$nhg[data$`nhg:ch1` %in% "G3"] <- 3
+
+hist(data$`age at diagnosis:ch1`)
+data$ageGroup <- NA
+data$ageGroup[data$`age at diagnosis:ch1` < 50] <- "<50"
+data$ageGroup[data$`age at diagnosis:ch1` >= 50 & data$`age at diagnosis:ch1` < 65] <- "50-65"
+data$ageGroup[data$`age at diagnosis:ch1` >= 65 & data$`age at diagnosis:ch1` < 80] <- "65-80"
+data$ageGroup[data$`age at diagnosis:ch1` >= 80] <- ">80"
+data$ageGroup <- factor(data$ageGroup, levels = c("<50", "50-65", "65-80", ">80"))
+
+
+data$ageGroup[data$`age at diagnosis:ch1` < 50] <- "<50"
+data$ageGroup[data$`age at diagnosis:ch1` >= 50 & data$`age at diagnosis:ch1` < 80] <- "50-70"
+data$ageGroup[data$`age at diagnosis:ch1` >= 80] <- ">70"
+
+
+
+kmFit <- survfit(Surv(`overall survival days:ch1`, 
+                      `overall survival event:ch1`) ~ CosinetScore, 
+                 data = data)
+
+summary(kmFit)
+
+logRank <- survdiff(formula = Surv(`overall survival days:ch1`, 
+                                   `overall survival event:ch1`) ~ CosinetScore, 
+                    data = data)
+
+logRank
+
+pairwise_survdiff(formula = Surv(`overall survival days:ch1`, 
+                                 `overall survival event:ch1`) ~ CosinetScore, 
+                  data = data, p.adjust.method = "BH", rho = 0)
+
+
+ggsurvplot(kmFit, data = data, conf.int = TRUE,
+           ggtheme = theme_bw(), pval = 2e-12)
+
+ggsurvplot(kmFit, data = data, conf.int = TRUE,
+           ggtheme = theme_bw(), pval = T)
+
+ggsurvplot_facet(kmFit, data = data, facet.by = "ageGroup", conf.int = TRUE,
+                 ggtheme = theme_bw(), pval = T)
+
+
+ggsurvplot_facet(kmFit, facet.by = "ageGroup", data = data, conf.int = TRUE,
+                 ggtheme = theme_bw(), pval = TRUE)
+
+ggsurvplot(kmFit, data = data, conf.int = TRUE,
+           pval.method=T,risk.table= "percentage",
+           cumevents = T, cumcensor = T,
+           ggtheme = theme_bw(), pval = TRUE)
+
+
+
+
+
+coxph(Surv(data$`overall survival days:ch1`, 
+           data$`overall survival event:ch1`) ~ data$cosinet + 
+          data$`age at diagnosis:ch1` +
+          nhg, data = data)
+
+plot(data$cosinet, data$`overall survival days:ch1`)
+plot(data$cosinet, data$`age at diagnosis:ch1`)
+
+data <- data[data$`age at diagnosis:ch1` < 70 & data$`age at diagnosis:ch1` > 50
+             & !data$`nhg:ch1` %in% "G3", ]
+data <- data[data$`nhg:ch1` %in% "G3", ]
+
+
+
+coxph(Surv(data$`overall survival days:ch1`, 
+           data$`overall survival event:ch1`) ~ data$cosinet + 
+          data$`age at diagnosis:ch1`)
+
+
+
+coxph(Surv(data$`overall survival days:ch1`, 
+           data$`overall survival event:ch1`) ~ data$cosinet + 
+          data$`age at diagnosis:ch1` + data$`nhg:ch1`)
+
+data$nhg <- NA
+data$nhg[data$`nhg:ch1` %in% "G1"] <- 1
+data$nhg[data$`nhg:ch1` %in% "G2"] <- 2
+data$nhg[data$`nhg:ch1` %in% "G3"] <- 3
+
+coxph(Surv(data$`overall survival days:ch1`, 
+           data$`overall survival event:ch1`) ~ data$cosinet + 
+          data$`age at diagnosis:ch1` +
+          data$nhg +
+          data$`pgr status:ch1` +
+          data$`her2 status:ch1` +
+          data$ESR1)
+
+
+coxph(Surv(data$`overall survival days:ch1`, 
+           data$`overall survival event:ch1`) ~ data$`age at diagnosis:ch1`) 
+
+
+
+data <- data[data$`nhg:ch1` %in% "G2", ]
+
+
+summary(coxph(Surv(data$`overall survival days:ch1`, 
+                   data$`overall survival event:ch1`) ~ data$cosinet + 
+                  data$`age at diagnosis:ch1`))
+
+coxph(Surv(data$`overall survival days:ch1`, 
+           data$`overall survival event:ch1`) ~ data$cosinet + 
+          data$`age at diagnosis:ch1`)
+
+
+ggplot(data[!is.na(data$nhg), ], aes(x=`nhg:ch1`, y=cosinet, 
+                                     color=`nhg:ch1`)) +
+    geom_boxplot(notch=TRUE)+
+    geom_point(position="jitter", alpha=.5) +
+    guides(color = guide_legend("NHG")) +
+    geom_hline(yintercept = 0, linetype="dashed",
+               color = "grey") +
+    theme_bw() +
+    labs(y = "Cosinet Score",
+         x = "NHG") +
+    stat_compare_means()
+
+
+
+
+scatterCorPlot(exprMat = exprs, geneX = "KCNK5", condition = condition,
+               geneY = c("FOXC1"),
+               add = "none", 
+               scores = scoreMat$FOXC1_KCNK5,
+               seperate = T)
+
+
+data <- data.frame(meanDiffDepScore = scoreMat2$CosiNet)
+data <- cbind.data.frame(data, sampleInfo)
+# data <- data[!is.na(data$her2_status), ]
+# data$PIK3CA <- as.factor(data$PIK3CA)
+
+library(ggplot2)
+ggplot(data, aes(x = meanDiffDepScore, fill = as.factor(data$`er status:ch1`))) +
+    geom_histogram(color="#e9ecef", alpha = 0.6,
+                   position = 'identity', bins = 40) +
+    guides(fill = guide_legend("ER status")) +
+    geom_vline(xintercept = 0, linetype="dashed",
+               color = "grey") +
+    theme_bw() +
+    labs(x = "EMT co-expression network pertubation score")

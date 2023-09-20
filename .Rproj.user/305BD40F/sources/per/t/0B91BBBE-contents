@@ -1,0 +1,254 @@
+#' Cosinet Score
+#'
+#' Calculate cosinet score for a given set of genes.
+#'
+#' Calculate cosinet score for a given set of genes. Based on gene co-expression
+#' pattern of a given gene set, cosinet scores measure the likelihood that a
+#' sample belongs to one condition other than the other.
+#'
+#'
+#' @param exprMat an expression matrix. The rows represent genes and
+#' the columns represent samples.
+#' @param condition a vector of test conditions for each samples.
+#' There should be two conditions within this vector. The order of the vector
+#' should match the column order of the expression matrix.
+#' @param genes a character vector of genes to be evaluated.
+#' @param sampleNames a character vector of sample names to calculate the
+#' cosinet scores for.
+#' @param bin a numeric value between 0 and 1 represent the fraction of the
+#' bin size relative to the expression range. Binned region is used to estimate
+#' local density of gene expression pattern, and thus the probability that a
+#' sample's gene-pair co-expression belongs to certain group.
+#' @param dcMat a matrix of z-scores representing differential associations
+#' of gene expression between two conditions. See {\link{DCMat}} for more
+#' details. This matrix, along with posDCCut and negDCCut, are used to 1. remove
+#' gene pairs that show low level of differential co-expression, so that only
+#' key changes in the network are accounted for; and 2. used as weights for
+#' cosinet score calculating. Other matrix, as long as it measures the level of
+#' differential co-expression, can also be used.
+#' @param posDCCut a positive numeric value that serves as positive
+#' threshold for DCMat. Genes pairs with positive DCMat values below this
+#' threshold are not used for the calculation.
+#' @param negDCCut a negative numeric value that serves as negative
+#' threshold for DCMat. Genes pairs with negative DCMat values above this
+#' threshold are not used for the calculation.
+#' @param weighted logical indicator for weighting each gene pair by the
+#' absolute value of corresponding dcMat score during cosinet score calculation.
+#' @param threads number of threads used for calculation.
+#' @return a matrix of scores representing the final cosinet score calculated
+#' using the given set of genes and the individual scores for each gene pair.
+#' The larger the scores, the more likely that the sample come from the second
+#' condition other than the first condition.
+#'
+#' @author Lanying Wei
+#'
+#' @seealso \code{\link{DCMat}}
+#' @seealso \code{\link{eigenCentrality}}
+#'
+#' @importFrom foreach foreach %dopar%
+#' @importFrom parallel makeCluster stopCluster
+#' @importFrom doParallel registerDoParallel
+#' @importFrom stats p.adjust t.test
+#' @importFrom utils combn
+#'
+#'
+#' @examples
+#'
+#' # get expression data
+#' data(exprBC)
+#' # get sample information
+#' data(samplesBC)
+#' # get example genes
+#' data(genesER)
+#'
+#' # calculate differential correlation matrix
+#' dcMat <- DCMat(exprMat = exprBC,
+#'                condition = samplesBC$er_status,
+#'                corMethod = "spearman")
+#'
+#' # calculate cosinet scores with example genes
+#' scoreMat <- getCosi(exp = exprBC,
+#'                     bin = 0.1,
+#'                     condition = samplesBC$er_status,
+#'                     genes = genesER,
+#'                     dcMat = dcMat,
+#'                     posDCCut = 3,
+#'                     negDCCut = -3,
+#'                     threads = 2)
+#'
+#'
+#' @export
+
+getCosi <- function(exprMat,
+                    condition,
+                    genes,
+                    sampleNames=colnames(exprMat),
+                    bin=0.1,
+                    dcMat=NULL,
+                    posDCCut=3,
+                    negDCCut=-posDCCut,
+                    weighted=TRUE,
+                    threads=2) {
+
+    stopifnot(!missing(exprMat),
+              !missing(condition),
+              !missing(genes),
+              length(condition) == ncol(exprMat),
+              bin > 0 & bin < 1)
+
+    condition <- factor(condition)
+
+    if (length(levels(condition)) != 2) {
+        stop("There should be 2 levels of condition.")
+    }
+
+    if (!all(genes %in% rownames(exprMat))) {
+        stop("Gene ",
+             paste(genes[!genes %in% rownames(exprMat)], collapse = " "),
+             " not in exprMat.")
+    }
+
+    condition <- factor(condition)
+    dpScores <- diffDepScore(exprMat = exprMat,
+                             genes = genes,
+                             condition = condition,
+                             sampleNames = sampleNames,
+                             bin = bin,
+                             threads = threads)
+
+    scoreMat <- lapply(dpScores, function(x) x[lower.tri(x)])
+    scoreMat <- lapply(scoreMat, function(x) x[!is.na(x)])
+    scoreMat <- do.call(rbind, scoreMat)
+    scoreMat <- as.data.frame(scoreMat)
+    allComb <- combn(colnames(dpScores[[1]]), 2)
+    allComb <- apply(allComb, 2, paste, collapse="_")
+    colnames(scoreMat) <- allComb
+
+
+    if (!is.null(dcMat)) {
+        gene1 <- unlist(lapply(colnames(scoreMat), function(x) {
+            strsplit(x, "_")[[1]][1]
+        }))
+        gene2 <- unlist(lapply(colnames(scoreMat), function(x) {
+            strsplit(x, "_")[[1]][2]
+        }))
+
+        genePairs <- data.frame(gene1, gene2)
+        weights <- apply(genePairs, 1, function(x) dcMat[x[1], x[2]])
+
+        if (weighted == TRUE) {
+            message("Weight each gene pair by absolute scoreMat value.")
+            scoreMat <- t(t(scoreMat) * abs(weights))
+        }
+
+        if (!is.null(posDCCut) & !is.null(negDCCut)) {
+            scoreMat <- scoreMat[, weights > posDCCut | weights < negDCCut,
+                                 drop = FALSE]
+            message(sum(weights <= posDCCut & weights >= negDCCut),
+                    " gene pairs that failed to meet the dcMat thresholds",
+                    " were removed from cosinet score calculation.")
+        }
+    }
+
+
+    Cosinet <- apply(scoreMat, 1, function(x) mean(x, na.rm = TRUE))
+
+    scoreMat <- cbind(Cosinet, scoreMat)
+    scoreMat <- as.data.frame(scoreMat)
+
+    message(ncol(scoreMat) - 1,
+            " gene pairs contributed to the final cosinet score calculation.")
+
+    return(scoreMat)
+}
+
+diffDepScore <- function(exprMat,
+                         genes,
+                         condition,
+                         sampleNames=colnames(exprMat),
+                         bin=0.1,
+                         threads=2) {
+
+    condition <- factor(condition)
+
+    exprMat1 <- exprMat[genes, condition %in% levels(condition)[1]]
+    exprMat2 <- exprMat[genes, condition %in% levels(condition)[2]]
+
+    cl <- makeCluster(threads)
+    registerDoParallel(cl)
+
+    message("Performing calculation using ", threads, " threads...")
+
+    nSamples <- ceiling(length(sampleNames) / threads)
+    nTimes <- min(threads, ceiling(length(sampleNames) / nSamples))
+
+    i <- 1
+    res <- foreach(i = seq_len(nTimes),
+                   .combine = "c",
+                   .inorder = TRUE,
+                   .verbose = FALSE,
+                   .export = c("dependScore")
+    ) %dopar% {
+        start <- (i - 1) * nSamples + 1
+        end <- min(i * nSamples, length(sampleNames))
+        diffDepScoreList <- list()
+        for (sampleName in sampleNames[start:end]) {
+            if (!sampleName %in% colnames(exprMat1)) {
+                m1 <- cbind(exprMat1, exprMat[genes, sampleName, drop = FALSE])
+                colnames(m1)[ncol(m1)] <- sampleName
+            } else {
+                m1 <- exprMat1
+            }
+            if (!sampleName %in% colnames(exprMat2)) {
+                m2 <- cbind(exprMat2, exprMat[genes, sampleName, drop = FALSE])
+                colnames(m2)[ncol(m2)] <- sampleName
+            } else {
+                m2 <- exprMat2
+            }
+            dependScore1 <- dependScore(m1, sampleName, bin = bin)
+            dependScore2 <- dependScore(m2, sampleName, bin = bin)
+            dependScore1[dependScore1 < 0] <- 0
+            dependScore2[dependScore2 < 0] <- 0
+            diffDepScore <- dependScore2 - dependScore1
+
+            diffDepScoreList[[sampleName]] <- diffDepScore
+        }
+        return(diffDepScoreList)
+    }
+
+    stopCluster(cl)
+    return(res)
+}
+
+dependScore <- function(exprMat,
+                        sampleName,
+                        bin=0.1) {
+    n <- ncol(exprMat)
+    minExp <- apply(exprMat[, !colnames(exprMat) %in% sampleName], 1,
+                    function(x) min(x, na.rm = TRUE))
+    maxExp <- apply(exprMat[, !colnames(exprMat) %in% sampleName], 1,
+                    function(x) max(x, na.rm = TRUE))
+    binVal <- (maxExp - minExp) * bin * 0.5
+    diffExp <- abs(exprMat - exprMat[, sampleName])
+    diffExp[, sampleName] <- Inf
+    binMat <- lapply(seq_len(nrow(diffExp)), function(i) {
+        x <- diffExp[i, ]
+        binVec <- rep(0, length(x))
+        binVec[x <= binVal[i]] <- 1
+        return(binVec)
+    })
+    binMat <- do.call(cbind, binMat)
+    rownames(binMat) <- colnames(diffExp)
+    colnames(binMat) <- rownames(diffExp)
+    binStat <- matrix(data = NA, nrow = nrow(exprMat), ncol = nrow(exprMat))
+    allComb <- combn(colnames(binMat), 2)
+    statistics <- mapply(function(gene1, gene2) {
+        x <- binMat[, gene1]
+        y <- binMat[, gene2]
+        (sum(x & y) / n - sum(x) / n * sum(y) / n) * 100
+    }, allComb[1, ], allComb[2, ], SIMPLIFY = TRUE, USE.NAMES = FALSE)
+    binStat[lower.tri(binStat, diag = FALSE)] <- statistics
+    colnames(binStat) <- rownames(exprMat)
+    rownames(binStat) <- rownames(exprMat)
+    return(binStat)
+}

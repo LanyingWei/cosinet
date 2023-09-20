@@ -1,0 +1,95 @@
+#' Eigenvector Centrality
+#'
+#' Calculate eigenvector centrality by power iteration.
+#'
+#' Perform power iteration to calculate eigenvector centrality that correspond
+#' to the values of the first eigenvector of the matrix. Nodes (genes) with high
+#' eigenvector centralities are those which are highly connected to many other
+#' nodes which are highly connected to many others (and so on). When using
+#' differential co-expression z-score matrix as input, the nodes with high
+#' eigenvector centralities represents the genes that are located at the hubs
+#' of highly differentially co-expressed sub-networks.
+#'
+#' @param mat a symmetric matrix with diagonal value of zeros.
+#' @param tolerance error tolerance used to check convergence in power iteration.
+#' If the total absolute difference of the two neighboring iterations is less than
+#' tolerance, then the algorithm stops. If tolerance is not reached before maxIter times
+#' of iteration, then the algorithm stops as well.
+#' @param maxIter maximum number of iterations for computation.
+#' If tolerance is not reached, then maxIter is used as stop criterion.
+#' @param sorted logical indicator of returning sorted
+#' centrality scores (decreasing order) or not.
+#'
+#' @return a vector of eigenvector centrality scores for each node.
+#'
+#' @examples
+#' # get expression data
+#' data(exprBC)
+#' # get sample information
+#' data(samplesBC)
+#'
+#' # calculate differential correlation matrix
+#' dcMat <- DCMat(exprMat = exprBC,
+#'                condition = samplesBC$er_status,
+#'                corMethod = "spearman")
+#'
+#' # calculate gene centrality base on differential correlation matrix
+#' geneCentrality <- eigenCentrality(mat = dcMat)
+#'
+#' @author Lanying Wei
+#'
+#' @seealso \code{\link{DCMat}}
+#' @seealso \code{\link{rankPlot}}
+#'
+#' @export
+#'
+
+eigenCentrality <- function(mat,
+                            tolerance=1e-6,
+                            maxIter=500,
+                            sorted=TRUE) {
+
+    stopifnot(!missing(mat))
+
+    if (!all(rownames(mat) == colnames(mat))) {
+        stop("Symmetric matrix required.")
+    }
+    if (!all(diag(mat) == 0)) {
+        stop("Diagonal values should be all zeros.")
+    }
+
+    mat <- abs(mat)
+    message("Use the absolute value of the matrix to proceed.")
+    n <- ncol(mat)
+    x0 <- rep(0, n)
+    x1 <- rep(1 / n, n)
+    iter <- 0
+
+    while (sum(abs(x0 - x1)) > tolerance && iter < maxIter) {
+        if (iter !=0 && iter %% 50 == 0) {
+            message("Number of current iterations: ", iter)
+        }
+        x0 <- x1
+        x1 <- x1 %*% mat
+        m <- max(x1, na.rm = TRUE)
+        x1 <- x1 / m
+        iter <- iter + 1
+    }
+
+    message("Total number of iterations: ", iter)
+    message("Total differences between the last two iterations: ",
+            sum(abs(x0 - x1)))
+
+    names(x1) <- colnames(mat)
+    if (sorted) {
+        x1 <- sort(x1, decreasing = TRUE)
+    }
+
+    return(x1)
+}
+
+
+
+
+
+
